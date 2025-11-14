@@ -61,7 +61,7 @@ Core3 = {
 	DBUser = "swgemu",
 	DBPass = "",
 	DBInstances = 2,
-	DBSecret = "Vanguard2025", -- Change this! This value should be unique and of reasonable length.
+	DBSecret = "", -- Change this! This value should be unique and of reasonable length.
 
 	------Login Server Config------
 	LoginPort = 44453,
