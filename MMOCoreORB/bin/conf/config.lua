@@ -59,7 +59,7 @@ Core3 = {
 	DBPort = 3306,
 	DBName = "swgemu",
 	DBUser = "swgemu",
-	DBPass = "l26m06h94",
+	DBPass = "",
 	DBInstances = 2,
 	DBSecret = "Vanguard2025", -- Change this! This value should be unique and of reasonable length.
 
