@@ -59,9 +59,9 @@ Core3 = {
 	DBPort = 3306,
 	DBName = "swgemu",
 	DBUser = "swgemu",
-	DBPass = "123456",
+	DBPass = "l26m06h94",
 	DBInstances = 2,
-	DBSecret = "swgemus3cr37!", -- Change this! This value should be unique and of reasonable length.
+	DBSecret = "Vanguard2025", -- Change this! This value should be unique and of reasonable length.
 
 	------Login Server Config------
 	LoginPort = 44453,
@@ -96,16 +96,16 @@ Core3 = {
 
 	"corellia",
 	"dantooine",
-	"dathomir",
+	--"dathomir",
 	"dungeon1",
-	"endor",
+	--"endor",
 	"lok",
-	"naboo",
-	"rori",
-	"talus",
+	--"naboo",
+	--"rori",
+	--"talus",
 	"tatooine",
 	"tutorial",
-	"yavin4"
+	--"yavin4"
 	-------- TEST ZONES -------
 	--"09",
 	--"10",
