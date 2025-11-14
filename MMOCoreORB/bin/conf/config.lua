@@ -147,7 +147,7 @@ Core3 = {
 	},
 
 	------TRE config------
-	TrePath = "/home/swgemu/Desktop/SWGEmu",
+	TrePath = "/home/luke/Vanguard/tre",
 	TreFiles = {
 		"default_patch.tre",
 		"patch_sku1_14_00.tre",
