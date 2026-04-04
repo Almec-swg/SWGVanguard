@@ -6,8 +6,8 @@
 #include "SpaceZoneComponent.h"
 #include "server/zone/SpaceZone.h"
 #include "server/zone/objects/area/ActiveArea.h"
-#include "server/zone/objects/building/BuildingObject.h"
 #include "server/zone/objects/scene/SceneObject.h"
+#include "server/zone/objects/creature/CreatureObject.h"
 #include "server/zone/objects/ship/ShipObject.h"
 #include "server/zone/packets/object/DataTransform.h"
 #include "server/zone/packets/object/DataTransformWithParent.h"
@@ -43,21 +43,23 @@ void SpaceZoneComponent::teleport(SceneObject* sceneObject, float newPositionX, 
 	ZoneServer* zoneServer = sceneObject->getZoneServer();
 	Zone* zone = sceneObject->getZone();
 
-	if (zone == nullptr || !zone->isSpaceZone())
+	if (zone == nullptr || !zone->isSpaceZone()) {
 		return;
+	}
 
 	if (parentID != 0) {
 		Reference<SceneObject*> newParent = zoneServer->getObject(parentID);
 
-		if (newParent == nullptr || !newParent->isCellObject())
+		if (newParent == nullptr) {
 			return;
+		}
 
 		if (newPositionX != sceneObject->getPositionX() || newPositionZ != sceneObject->getPositionZ() || newPositionY != sceneObject->getPositionY()) {
 			sceneObject->setPosition(newPositionX, newPositionZ, newPositionY);
 			sceneObject->updateZoneWithParent(newParent, false, false);
 		}
 
-		//sceneObject->incrementMovementCounter();
+		sceneObject->incrementMovementCounter();
 
 		DataTransformWithParent* pack = new DataTransformWithParent(sceneObject);
 		sceneObject->broadcastMessage(pack, true, false);
@@ -67,7 +69,7 @@ void SpaceZoneComponent::teleport(SceneObject* sceneObject, float newPositionX, 
 			sceneObject->updateZone(false, false);
 		}
 
-		//sceneObject->incrementMovementCounter();
+		sceneObject->incrementMovementCounter();
 
 		DataTransform* pack = new DataTransform(sceneObject);
 		sceneObject->broadcastMessage(pack, true, false);
@@ -137,20 +139,32 @@ void SpaceZoneComponent::updateZoneWithParent(SceneObject* sceneObject, SceneObj
 
 	Locker _locker(spaceZone);
 
-	if (oldParent != newParent) {
-		// Player is in POB Ship cell
-		if (newParent->isCellObject()) {
-			newParent->transferObject(sceneObject, -1, true);
-		// Player is in slotted position
-		} else if (newParent->isValidJtlParent()) {
+	if (oldParent == nullptr || oldParent != newParent) {
+		newParent->transferObject(sceneObject, sceneObject->getContainmentType(), true);
+
+		spaceZone->unlock();
+	// Object already has a parent, so is either transferring to a new one or moving within the current and checking for active areas update
+	} else {
+		if (oldParent != newParent) {
 			newParent->transferObject(sceneObject, sceneObject->getContainmentType(), true);
+
+			spaceZone->unlock();
+		// Object is not changing parents, unlock the zone and just check for active areas upate.
+		} else {
+			spaceZone->unlock();
+
+			try {
+				TangibleObject* tano = sceneObject->asTangibleObject();
+
+				if (tano != nullptr) {
+					spaceZone->updateActiveAreas(tano);
+				}
+			} catch (Exception& e) {
+				sceneObject->error(e.getMessage());
+				e.printStackTrace();
+			}
 		}
 	}
-
-	spaceZone->update(sceneObject);
-	spaceZone->inRange(sceneObject, spaceZone->getZoneObjectRange());
-
-	spaceZone->unlock();
 
 	// Notify in range objects of the players movement update inside a container in space
 	try {
@@ -245,18 +259,50 @@ void SpaceZoneComponent::switchZone(SceneObject* sceneObject, const String& newT
 	sceneObject->incrementMovementCounter();
 
 	if (newParent != nullptr) {
-		// info(true) << "SpaceZoneComponent::switchZone -- starting transfer into new parent... ";
+#ifdef DEBUG_HYPERSPACE
+		info(true) << "SpaceZoneComponent::switchZone -- starting transfer into new parent... ";
+#endif
 
 		if (newParent->transferObject(sceneObject, playerArrangement, false, false, false)) {
-			sceneObject->sendToOwner(true);
+			bool isShipParent = newParent->isPilotChair() || newParent->isCellObject() || newParent->isShipTurret() || newParent->isOperationsChair();
 
-			// info(true) << "SpaceZoneComponent::switchZone transferred into Parent: " << newParent->getDisplayedName() << " Player: " << sceneObject->getDisplayedName() << " Containment Type: " << playerArrangement << " X: " << newPositionX << " Z: " << newPositionZ << " Y: " << newPositionY;
+			// For ship parents, split sendToOwner into two phases with a delay.
+			// The SWG client needs time to process CmdStartScene (scene reset / terrain load)
+			// before receiving SceneObjectCreate messages. If Creates arrive in the same UDP
+			// frame as CmdStartScene, the client may crash due to async scene initialization.
+			if (isShipParent && sceneObject->isPlayerCreature()) {
+				auto player = sceneObject->asCreatureObject();
 
-			if (newParent->isPilotChair() || newParent->isCellObject() || newParent->isShipTurret() || newParent->isOperationsChair()) {
+				if (player != nullptr) {
+					player->sendSceneResetToOwner();
+
+					Reference<CreatureObject*> playerRef = player;
+
+					Core::getTaskManager()->scheduleTask([playerRef] () {
+						if (playerRef == nullptr) {
+							return;
+						}
+
+						Locker lock(playerRef);
+
+						playerRef->sendObjectsToOwner(true);
+					}, "SendObjectsToOwnerDelay", 200);
+				}
+			} else {
+				sceneObject->sendToOwner(true);
+			}
+
+#ifdef DEBUG_HYPERSPACE
+			info(true) << "SpaceZoneComponent::switchZone transferred into Parent: " << newParent->getDisplayedName() << " Player: " << sceneObject->getDisplayedName() << " Containment Type: " << playerArrangement << " X: " << newPositionX << " Z: " << newPositionZ << " Y: " << newPositionY;
+#endif
+
+			if (isShipParent) {
 				auto rootParent = newParent->getRootParent();
 
 				if (rootParent != nullptr) {
-					// info(true) << "SpaceZoneComponent::switchZone notifying root parent: " << rootParent->getDisplayedName();
+#ifdef DEBUG_HYPERSPACE
+					info(true) << "SpaceZoneComponent::switchZone notifying root parent: " << rootParent->getDisplayedName();
+#endif
 
 					rootParent->notifyObjectInsertedToChild(sceneObject, newParent, nullptr);
 				}
@@ -294,19 +340,7 @@ void SpaceZoneComponent::destroyObjectFromWorld(SceneObject* sceneObject, bool s
 	Zone* spaceZone = sceneObject->getLocalZone();
 
 	if (par != nullptr) {
-		uint64 parentID = sceneObject->getParentID();
 		par->removeObject(sceneObject, nullptr, false);
-
-		if (par->isCellObject()) {
-			ManagedReference<BuildingObject*> build = par->getParent().get().castTo<BuildingObject*>();
-
-			if (build != nullptr) {
-				CreatureObject* creature = sceneObject->asCreatureObject();
-
-				if (creature != nullptr)
-					build->onExit(creature, parentID);
-			}
-		}
 
 		sceneObject->notifyObservers(ObserverEventType::OBJECTREMOVEDFROMZONE, sceneObject, 0);
 	} else if (spaceZone != nullptr) {

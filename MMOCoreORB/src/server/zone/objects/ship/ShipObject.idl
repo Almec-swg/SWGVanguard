@@ -14,6 +14,7 @@ import engine.service.proto.BaseMessage;
 import server.zone.objects.ship.ai.ShipAiAgent;
 import system.util.SortedVector;
 import system.lang.String;
+import system.thread.Mutex;
 
 include server.zone.TreeEntry;
 include server.zone.objects.scene.SceneObject;
@@ -134,6 +135,8 @@ class ShipObject extends TangibleObject {
 	protected unsigned int shipFaction;
 
 	protected transient boolean droidFeedback;
+
+	protected transient unsigned int timerTaskCrc;
 
 	// DeltaAutoVariable template <class K, class V, int BaselineName, uint8 DeltaType, int DeltaIndex>
 
@@ -428,6 +431,9 @@ class ShipObject extends TangibleObject {
 	protected DeltaAutoMap componentCRCs;
 
 	@dereferenced
+	protected transient Mutex playersOnBoardMutex;
+
+	@dereferenced
 	protected Vector<unsigned long> playersOnBoard;
 
 	protected string certificationRequired;
@@ -469,6 +475,8 @@ class ShipObject extends TangibleObject {
 		certificationRequired = "";
 		cargoString = "";
 	}
+
+	public native void finalize();
 
 	public native void notifyLoadFromDatabase();
 
@@ -519,8 +527,6 @@ class ShipObject extends TangibleObject {
 
 	@local
 	public native abstract void updateZone(boolean lightUpdate, boolean sendPackets = true);
-
-	public abstract native void updatePlayersInShip(boolean lightUpdate, boolean sendPackets = true);
 
 	@dirty
 	public native void broadcastPvpStatusBitmask();
@@ -1592,14 +1598,19 @@ class ShipObject extends TangibleObject {
 	@nativeStub
 	public native boolean isShipObject();
 
-	@dirty
+	@read
 	public boolean isHyperspacing() {
 		return hyperspacing;
 	}
 
-	@dirty
+	@read
 	public boolean hasShipWings() {
 		return hasWings;
+	}
+
+	@read
+	public float getWingsOpenSpeed() {
+		return wingsOpenSpeed;
 	}
 
 	@dirty
@@ -1691,7 +1702,12 @@ class ShipObject extends TangibleObject {
 	@preLocked
 	public abstract native void destroyObjectFromDatabase(boolean destroyContainedObjects = false);
 
+	@preLocked
+	public abstract native void removeAllPlayersFromShip();
+
 	public native CreatureObject getPilot();
+
+	public native CreatureObject getShipGunner();
 
 	public native CreatureObject getShipOperator();
 
@@ -1777,6 +1793,9 @@ class ShipObject extends TangibleObject {
 
 	public native boolean isShipDestroyed();
 
+	@read
+	public native boolean isShipDocking();
+
 	public native boolean isComponentInstalled(unsigned int slot);
 
 	public native boolean isComponentFunctional(unsigned int slot);
@@ -1789,7 +1808,7 @@ class ShipObject extends TangibleObject {
 
 	public native float calculateActualDecelerationRate();
 
-	public native float calculateActualMaxSpeed();
+	public abstract native float calculateActualMaxSpeed();
 
 	@dirty
 	public native abstract float getOutOfRangeDistance(unsigned long specialRangeObjectID = 0);
@@ -1911,4 +1930,13 @@ class ShipObject extends TangibleObject {
 
 	@local
 	public native float getNextRotation();
+
+	@local
+	@dereferenced
+	public abstract native Vector3 getObjectLocationInShip(SceneObject object, @dereferenced final Vector3 objectPosition);
+
+	@local
+	public native unsigned int getTimerTaskCrc() {
+		return timerTaskCrc;
+	}
 }

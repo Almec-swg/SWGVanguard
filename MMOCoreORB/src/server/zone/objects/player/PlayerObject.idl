@@ -306,6 +306,8 @@ class PlayerObject extends IntangibleObject {
 	protected int pilotTier;
 	protected unsigned int pilotSquadron;
 
+	protected boolean tutorialParticipant;
+
 	/**
 	 * the key is the quest.hashCode()
 	 */
@@ -426,6 +428,8 @@ class PlayerObject extends IntangibleObject {
 
 		pilotTier = 0;
 		pilotSquadron = 0;
+
+		tutorialParticipant = false;
 
 		Logger.setLoggingName("PlayerObjectBase");
 	}
@@ -985,7 +989,7 @@ class PlayerObject extends IntangibleObject {
 	/**
 	 * Unloads all the spawned objects from the datapad control devices
 	 */
-	public native void unloadSpawnedChildren(boolean petsOnly = false);
+	public native void unloadSpawnedChildren(boolean skipShips = false);
 
 	public void addToConsentList(final string name) {
 		consentList.put(name);
@@ -1080,12 +1084,10 @@ class PlayerObject extends IntangibleObject {
 		return savedTerrainName;
 	}
 
+	public native void setSavedTerrainName(final string name);
+
 	public void setSavedParentID(unsigned long id) {
 		savedParentID = id;
-	}
-
-	public void setSavedTerrainName(final string name) {
-		savedTerrainName = name;
 	}
 
 	public void setBirthDate(int date) {
@@ -2174,4 +2176,13 @@ class PlayerObject extends IntangibleObject {
 
 	@read
 	public native string getPlayedTimeString(boolean verbose = false);
+
+	public void setTutorialParticpant() {
+		tutorialParticipant = true;
+	}
+
+	@read
+	public boolean isTutorialParticipant() {
+		return tutorialParticipant;
+	}
 }

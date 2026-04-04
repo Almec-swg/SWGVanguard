@@ -8,7 +8,7 @@
 #ifndef SHIPUPDATETRANSFORMCALLBACK_H_
 #define SHIPUPDATETRANSFORMCALLBACK_H_
 
-//#define SHIP_TRANSFORM_DEBUG
+// #define SHIP_TRANSFORM_DEBUG
 
 #include "server/zone/objects/creature/CreatureObject.h"
 #include "server/zone/objects/player/PlayerObject.h"
@@ -135,7 +135,11 @@ public:
 			return;
 		}
 
-		PlayerObject* ghost = pilot->getPlayerObject();
+		if (pilot->isFrozen()) {
+			return updateError(pilot, "!frozen", true);
+		}
+
+		auto ghost = pilot->getPlayerObject();
 
 		if (ghost == nullptr) {
 			return updateError(pilot, "!ghost", false);
@@ -145,30 +149,32 @@ public:
 			return updateError(pilot, "ghost-TP", false);
 		}
 
+		if (ghost->isOnLoadScreen()) {
+			return updateError(pilot, "ghost-Loading", false);
+		}
+
 		ManagedReference<SceneObject*> rootParent = pilot->getRootParent();
 
 		if (rootParent == nullptr) {
 			return updateError(pilot, "!rootParent", false);
 		}
 
-		ShipObject* ship = rootParent->asShipObject();
+		auto ship = rootParent->asShipObject();
 
 		if (ship == nullptr) {
-			return updateError(pilot, "!ship", false);
+			return updateError(pilot, "!shipNull", false);
 		}
 
-		Zone* zone = ship->getZone();
-
-		if (zone == nullptr || !zone->isSpaceZone()) {
-			return updateError(pilot, "!zone", false);
+		if (!ship->isShipLaunched()) {
+			return updateError(pilot, "!shipLaunched", false);
 		}
 
-		Locker pLock(pilot);
-		Locker cLock(ship, pilot);
+		if (ship->isShipDocking()) {
+			return updateError(pilot, "!docking", false);
+		}
 
-		if (ghost->getClientLastMovementStamp() == 0 && counter != 0) {
-			ghost->setClientLastMovementStamp(counter);
-			return synchronize(ship, pilot);
+		if (!isPositionValid()) {
+			return updateError(pilot, "!isPositionValid", true);
 		}
 
 		deltaTime = (long)counter - (long)ghost->getClientLastMovementStamp();
@@ -181,19 +187,31 @@ public:
 			return;
 		}
 
-		if (!isPositionValid()) {
-			return updateError(pilot, "!isPositionValid", true);
-		}
+		Locker lock(ship);
+		Locker pilotClock(pilot, ship);
 
 		pilot->setSyncStamp(counter);
+		ghost->setClientLastMovementStamp(counter);
 
+		// Release the pilot
+		pilotClock.release();
+
+		// Validate client position against ship's actual position
+		// On reconnect the client can send stale coordinates before fully loading the ship's authoritative state
+		const Vector3& shipPosition = ship->getPosition();
+		float sqrDistance = shipPosition.squaredDistanceTo(Vector3(positionX, positionY, positionZ));
+		float maxDistance = Math::max(ship->getActualMaxSpeed() * 10.f, 200.f);
+
+		if (sqrDistance > (maxDistance * maxDistance)) {
+			return synchronize(ship, pilot);
+		}
+
+		// Handle ship zone updates
 		if (isPositionUpdate(ship)) {
 			updatePosition(ship, pilot);
 		} else if (isStaticUpdate(ship)) {
 			updateStatic(ship, pilot);
 		}
-
-		ghost->setClientLastMovementStamp(counter);
 	}
 
 	bool isPositionValid() const {
@@ -206,6 +224,11 @@ public:
 
 	bool isPositionUpdate(ShipObject* ship) const {
 		const Vector3& position = ship->getPosition();
+
+#ifdef SHIP_TRANSFORM_DEBUG
+		ship->info(true) << "isPositionUpdate -- Ship Current Position: " << position.toString();
+		ship->info(true) << "Parsed Position -- X: " << positionX << " Z: " << positionZ << " Y: " << positionY;
+#endif // SHIP_TRANSFORM_DEBUG
 
 		if (positionX != position.getX() || positionY != position.getY() || positionZ != position.getZ()) {
 			return true;
@@ -233,8 +256,8 @@ public:
 		sendDebug(pilot, ship, "updateCollision", collisionPoint);
 #endif // SHIP_TRANSFORM_DEBUG
 
-		updateTransform(ship, pilot, collisionPoint, true);
-		broadcastTransform(ship, pilot, collisionPoint);
+		updateTransform(ship, collisionPoint, true);
+		broadcastTransform(ship, collisionPoint);
 
 		auto collide = new ShipUpdateTransformCollisionMessage(ship);
 		ship->broadcastMessage(collide, false);
@@ -257,8 +280,8 @@ public:
 		sendDebug(pilot, ship, "updatePosition", nextPosition);
 #endif // SHIP_TRANSFORM_DEBUG
 
-		updateTransform(ship, pilot, position, false);
-		broadcastTransform(ship, pilot, nextPosition);
+		updateTransform(ship, position, false);
+		broadcastTransform(ship, nextPosition);
 	}
 
 	void updateStatic(ShipObject* ship, CreatureObject* pilot) {
@@ -268,8 +291,8 @@ public:
 		sendDebug(pilot, ship, "updateStatic", position);
 #endif // SHIP_TRANSFORM_DEBUG
 
-		updateTransform(ship, pilot, position, false);
-		broadcastTransform(ship, pilot, position);
+		updateTransform(ship, position, false);
+		broadcastTransform(ship, position);
 	}
 
 	void synchronize(ShipObject* ship, CreatureObject* pilot) {
@@ -279,10 +302,10 @@ public:
 		sendDebug(pilot, ship, "synchronize", position);
 #endif // SHIP_TRANSFORM_DEBUG
 
-		updateTransform(ship, pilot, position, true);
+		updateTransform(ship, position, true);
 	}
 
-	void updateTransform(ShipObject* ship, CreatureObject* pilot, const Vector3& position, bool reorthonormalize) {
+	void updateTransform(ShipObject* ship, const Vector3& position, bool reorthonormalize) {
 		Quaternion direction(directionW, directionX, directionY, directionZ);
 
 		if (reorthonormalize) {
@@ -304,6 +327,7 @@ public:
 		ship->setDirection(direction);
 
 		bool lightUpdate = (ship->getMovementCounter() % PRIORITY_MAX) != 0;
+
 		ship->updateZone(lightUpdate, false);
 		ship->incrementMovementCounter();
 
@@ -319,7 +343,7 @@ public:
 		}
 	}
 
-	void broadcastTransform(ShipObject* ship, CreatureObject* pilot, const Vector3& position) {
+	void broadcastTransform(ShipObject* ship, const Vector3& position) {
 		auto shipCov = ship->getCloseObjects();
 
 		if (shipCov == nullptr) {
@@ -399,6 +423,7 @@ public:
 		msg << "Transform:  " << message << endl
 			<< " ShipId:    " << shipId << endl
 			<< " Position:  " << positionX  << ", " << positionZ  << ", " << positionY << endl
+			<< " Parsed Position:  " << posX  << ", " << posZ  << ", " << posY << endl
 			<< " Direction: " << directionW  << ", " << directionX  << ", " << directionY << ", " << directionZ << endl
 			<< " Velocity:  " << velocity.getSpeed() << "/" << ship->getActualMaxSpeed() << endl
 			<< " yawRate:   " << yawRate.get() << endl
@@ -409,6 +434,7 @@ public:
 			<< "--------------------------------";
 
 		pilot->sendSystemMessage(msg.toString());
+		pilot->info(true) << msg.toString();
 	}
 
 	void sendDebugPath(CreatureObject* pilot, ShipObject* ship, const Vector3& nextPosition) {

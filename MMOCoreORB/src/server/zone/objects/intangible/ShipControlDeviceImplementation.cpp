@@ -83,7 +83,7 @@ void ShipControlDeviceImplementation::fillObjectMenuResponse(ObjectMenuResponse*
 	menuResponse->addRadialMenuItem(RadialOptions::SET_NAME, 3, "@sui:rename_ship"); // Rename Ship
 
 	// Deed Ship
-	menuResponse->addRadialMenuItem(RadialOptions::SERVER_MENU1, 3, "@sui:pack_ship"); // Deed Ship
+	menuResponse->addRadialMenuItem(RadialOptions::SERVER_DIVIDER, 3, "@sui:pack_ship"); // Deed Ship
 
 	auto root = player->getRootParent();
 
@@ -107,9 +107,9 @@ void ShipControlDeviceImplementation::fillObjectMenuResponse(ObjectMenuResponse*
 
 	if (isShipLaunched()) {
 		String zoneName = StringIdManager::instance()->getStringId("@planet_n:" + storedZoneName).toString();
-		menuResponse->addRadialMenuItem(LANDSHIP, 3, "Land Ship: " + parkingLocation + ", " + zoneName);
+		menuResponse->addRadialMenuItem(RadialOptions::PET_STORE, 3, "Land Ship: " + parkingLocation + ", " + zoneName);
 	} else {
-		menuResponse->addRadialMenuItem(LAUNCHSHIP, 3, "Launch Ship");
+		menuResponse->addRadialMenuItem(RadialOptions::SERVER_MENU1, 3, "Launch Ship");
 
 		for (int i = 0; i < zoneServer->getSpaceZoneCount(); ++i) {
 			auto zone = zoneServer->getSpaceZone(i);
@@ -118,7 +118,7 @@ void ShipControlDeviceImplementation::fillObjectMenuResponse(ObjectMenuResponse*
 				continue;
 			}
 
-			menuResponse->addRadialMenuItemToRadialID(LAUNCHSHIP, 1 + LAUNCHSHIP + i, 3, "@planet_n:" + zone->getZoneName());
+			menuResponse->addRadialMenuItemToRadialID(RadialOptions::SERVER_MENU1, 1 + RadialOptions::SERVER_MENU1 + i, 3, "@planet_n:" + zone->getZoneName());
 		}
 	}
 }
@@ -149,7 +149,7 @@ int ShipControlDeviceImplementation::handleObjectMenuSelect(CreatureObject* play
 
 		shipManager->promptNameShip(player, _this.getReferenceUnsafeStaticCast());
 	// Deed Ship
-	} else if (selectedID == RadialOptions::SERVER_MENU1) {
+	} else if (selectedID == RadialOptions::SERVER_DIVIDER) {
 		auto shipManager = ShipManager::instance();
 
 		if (shipManager == nullptr) {
@@ -157,8 +157,16 @@ int ShipControlDeviceImplementation::handleObjectMenuSelect(CreatureObject* play
 		}
 
 		shipManager->reDeedShip(player, _this.getReferenceUnsafeStaticCast());
-	} else if (isShipLaunched()) {
-		if (selectedID == LANDSHIP) {
+	}
+
+	auto ghost = player->getPlayerObject();
+
+	if (ghost == nullptr || !ghost->isPrivileged()) {
+		return 1;
+	}
+
+	if (isShipLaunched()) {
+		if (selectedID == RadialOptions::PET_STORE) {
 			auto zone = zoneServer->getZone(storedZoneName);
 
 			if (zone == nullptr) {
@@ -167,31 +175,46 @@ int ShipControlDeviceImplementation::handleObjectMenuSelect(CreatureObject* play
 
 			StoreShipTask* task = new StoreShipTask(player, _this.getReferenceUnsafeStaticCast(), storedZoneName, storedPosition);
 
-			if (task != nullptr)
+			if (task != nullptr) {
 				task->execute();
+			}
 
 			return isShipLaunched() ? 1 : 0;
 		}
-	} else {
-		if (selectedID > LAUNCHSHIP) {
-			int spaceZoneIndex = selectedID - LAUNCHSHIP - 1;
-			int spaceZoneCount = zoneServer->getSpaceZoneCount();
+	} else if (selectedID > RadialOptions::SERVER_MENU1) {
+		int spaceZoneIndex = selectedID - RadialOptions::SERVER_MENU1 - 1;
+		int spaceZoneCount = zoneServer->getSpaceZoneCount();
 
-			auto zone = (spaceZoneIndex < spaceZoneCount) ? zoneServer->getSpaceZone(spaceZoneIndex) : nullptr;
+		auto zone = (spaceZoneIndex < spaceZoneCount) ? zoneServer->getSpaceZone(spaceZoneIndex) : nullptr;
 
-			if (zone == nullptr) {
-				return 1;
-			}
-
-			Vector<uint64> dummyVec;
-
-			LaunchShipTask* launchTask = new LaunchShipTask(player, _this.getReferenceUnsafeStaticCast(), dummyVec, zone->getZoneName());
-
-			if (launchTask != nullptr)
-				launchTask->execute();
-
-			return 0;
+		if (zone == nullptr) {
+			return 1;
 		}
+
+		Vector<uint64> groupVector;
+		auto group = player->getGroup();
+
+		if (group != nullptr) {
+			Locker groupClock(group, player);
+
+			for (int i = 0; i < group->getGroupSize(); i++) {
+				auto member = group->getGroupMember(i);
+
+				if (member == nullptr || member == player || !member->isPlayerCreature()) {
+					continue;
+				}
+
+				groupVector.add(member->getObjectID());
+			}
+		}
+
+		LaunchShipTask* launchTask = new LaunchShipTask(player, _this.getReferenceUnsafeStaticCast(), groupVector, zone->getZoneName());
+
+		if (launchTask != nullptr) {
+			launchTask->schedule(1000);
+		}
+
+		return 0;
 	}
 
 	return 1;
@@ -287,7 +310,7 @@ void ShipControlDeviceImplementation::setStoredLocationData(CreatureObject* play
 		return;
 	}
 
-	auto travelPoint = planetManager->getNearestPlanetTravelPoint(player->getWorldPosition(), 128.f);
+	auto travelPoint = planetManager->getNearestPlanetTravelPoint(player->getWorldPosition());
 
 	if (travelPoint == nullptr) {
 		return;

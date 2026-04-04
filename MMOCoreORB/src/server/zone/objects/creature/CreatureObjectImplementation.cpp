@@ -289,7 +289,9 @@ void CreatureObjectImplementation::sendToOwner(bool doClose) {
 		return;
 	}
 
-	// info(true) << getDisplayedName() << " sendToOwner -- START";
+#ifdef DEBUG_HYPERSPACE
+	info(true) << getDisplayedName() << " sendToOwner -- START";
+#endif
 
 	setMovementCounter(0);
 
@@ -310,6 +312,9 @@ void CreatureObjectImplementation::sendToOwner(bool doClose) {
 	ManagedReference<SceneObject*> rootParent = getRootParent();
 
 	if (rootParent != nullptr) {
+#ifdef DEBUG_HYPERSPACE
+		info(true) << getDisplayedName() << " sendToOwner -- sending rootParent: " << rootParent->getDisplayedName() << " ID: " << rootParent->getObjectID();
+#endif
 		rootParent->sendTo(asCreatureObject(), true);
 	} else {
 		sendTo(asCreatureObject(), doClose);
@@ -321,6 +326,12 @@ void CreatureObjectImplementation::sendToOwner(bool doClose) {
 
 	SortedVector<TreeEntry*> closeObjects;
 	vec->safeCopyTo(closeObjects);
+
+#ifdef DEBUG_HYPERSPACE
+	info(true) << getDisplayedName() << " sendToOwner -- sending " << closeObjects.size() << " close objects";
+
+	int closeObjectsSent = 0;
+#endif
 
 	for (int i = 0; i < closeObjects.size(); ++i) {
 		SceneObject* obj = static_cast<SceneObject*> (closeObjects.get(i));
@@ -339,6 +350,9 @@ void CreatureObjectImplementation::sendToOwner(bool doClose) {
 		}
 
 		sendTo(obj, true, false);
+#ifdef DEBUG_HYPERSPACE
+		closeObjectsSent++;
+#endif
 	}
 
 	if (group != nullptr) {
@@ -347,7 +361,107 @@ void CreatureObjectImplementation::sendToOwner(bool doClose) {
 
 	owner->resetPacketCheckupTime();
 
-	// info(true) << getDisplayedName() << " sendToOwner -- COMPLETE";
+#ifdef DEBUG_HYPERSPACE
+	info(true) << getDisplayedName() << " sendToOwner -- COMPLETE -- sent " << closeObjectsSent << " close objects";
+#endif
+}
+
+void CreatureObjectImplementation::sendSceneResetToOwner() {
+	auto owner = this->owner.get();
+
+	if (owner == nullptr) {
+		return;
+	}
+
+	setMovementCounter(0);
+
+	owner->balancePacketCheckupTime();
+
+	BaseMessage* byteFlag = new unkByteFlag();
+	owner->sendMessage(byteFlag);
+
+	BaseMessage* startScene = new CmdStartScene(asCreatureObject());
+	owner->sendMessage(startScene);
+
+	BaseMessage* parameters = new ParametersMessage();
+	owner->sendMessage(parameters);
+
+	auto zoneServer = server->getZoneServer();
+
+	if (zoneServer != nullptr) {
+		ManagedReference<GuildManager*> guildManager = zoneServer->getGuildManager();
+
+		if (guildManager != nullptr) {
+			guildManager->sendBaselinesTo(asCreatureObject());
+		}
+	}
+}
+
+void CreatureObjectImplementation::sendObjectsToOwner(bool doClose) {
+	auto owner = this->owner.get();
+
+	if (owner == nullptr) {
+		return;
+	}
+
+#ifdef DEBUG_HYPERSPACE
+	info(true) << getDisplayedName() << " sendObjectsToOwner -- START";
+#endif
+
+	ManagedReference<SceneObject*> rootParent = getRootParent();
+
+	if (rootParent != nullptr) {
+#ifdef DEBUG_HYPERSPACE
+		info(true) << getDisplayedName() << " sendObjectsToOwner -- sending rootParent: " << rootParent->getDisplayedName() << " ID: " << rootParent->getObjectID();
+#endif
+		rootParent->sendTo(asCreatureObject(), true);
+	} else {
+		sendTo(asCreatureObject(), doClose);
+	}
+
+	CloseObjectsVector* vec = getCloseObjects();
+
+	fatal(vec != nullptr) << "close objects vector in creo::sendObjectsToOwner null";
+
+	SortedVector<TreeEntry*> closeObjects;
+	vec->safeCopyTo(closeObjects);
+
+#ifdef DEBUG_HYPERSPACE
+	info(true) << getDisplayedName() << " sendObjectsToOwner -- sending " << closeObjects.size() << " close objects";
+
+	int closeObjectsSent = 0;
+#endif
+
+	for (int i = 0; i < closeObjects.size(); ++i) {
+		SceneObject* obj = static_cast<SceneObject*>(closeObjects.get(i));
+
+		if (obj == nullptr || obj == asCreatureObject()) {
+			continue;
+		}
+
+		if (obj != rootParent) {
+			notifyInsert(obj);
+		}
+
+		if (obj->isPlayerCreature()) {
+			obj->notifyDissapear(asCreatureObject());
+		}
+
+		sendTo(obj, true, false);
+#ifdef DEBUG_HYPERSPACE
+		closeObjectsSent++;
+#endif
+	}
+
+	if (group != nullptr) {
+		group->sendTo(asCreatureObject(), true);
+	}
+
+	owner->resetPacketCheckupTime();
+
+#ifdef DEBUG_HYPERSPACE
+	info(true) << getDisplayedName() << " sendObjectsToOwner -- COMPLETE -- sent " << closeObjectsSent << " close objects";
+#endif
 }
 
 void CreatureObjectImplementation::sendBaselinesTo(SceneObject* player) {
@@ -2267,12 +2381,14 @@ bool CreatureObjectImplementation::verifyCredits(int credits) {
 
 void CreatureObjectImplementation::notifyLoadFromDatabase() {
 	TangibleObjectImplementation::notifyLoadFromDatabase();
-	/**
-	 * Here we are loading the schematics based on the skills that the
-	 * player has, we do this incase we change the items
-	 * in the schematic group.
-	 */
-	PlayerObject* ghost = getPlayerObject();
+
+	// info(true) << getDisplayedName() << " --  CreatureObjectImplementation::notifyLoadFromDatabase called";
+
+	/*
+	* Here we are loading the schematics based on the skills that the
+	* player has, we do this incase we change the items
+	* in the schematic group.
+	*/
 
 	if (hasState(CreatureState::ALERT)) {
 		clearState(CreatureState::ALERT);
@@ -2304,24 +2420,37 @@ void CreatureObjectImplementation::notifyLoadFromDatabase() {
 		setPosture(CreaturePosture::UPRIGHT);
 	}
 
+	auto ghost = getPlayerObject();
+
 	if (ghost != nullptr) {
-		getZoneServer()->getPlayerManager()->fixHAM(asCreatureObject());
-		getZoneServer()->getPlayerManager()->fixBuffSkillMods(asCreatureObject());
-        }
+		auto zoneServer = server->getZoneServer();
+
+		if (zoneServer != nullptr) {
+			auto playerManager = zoneServer->getPlayerManager();
+
+			if (playerManager != nullptr) {
+				playerManager->fixHAM(asCreatureObject());
+				playerManager->fixBuffSkillMods(asCreatureObject());
+			}
+		}
+	}
 
 	for (int i = 0; i < creatureBuffs.getBuffListSize(); ++i) {
 		ManagedReference<Buff*> buff = creatureBuffs.getBuffByIndex(i);
 
-		if (buff != nullptr)
+		if (buff != nullptr) {
+			Locker clock(buff, asCreatureObject());
+
 			buff->loadBuffDurationEvent(asCreatureObject());
+			buff->initializeBuffObservers();
+		}
 	}
 
-	if (ghost == nullptr)
+	if (ghost == nullptr) {
 		return;
+	}
 
-	ZoneServer* zoneServer = server->getZoneServer();
-	SkillManager* skillManager = SkillManager::instance();
-
+	auto skillManager = SkillManager::instance();
 	const SkillList* playerSkillList = getSkillList();
 
 	int totalSkillPointsWasted = 250;
@@ -2346,8 +2475,9 @@ void CreatureObjectImplementation::notifyLoadFromDatabase() {
 
 	skillManager->updateXpLimits(ghost);
 
-	if (getZone() != nullptr)
+	if (getZone() != nullptr) {
 		ghost->setLinkDead();
+	}
 }
 
 void CreatureObjectImplementation::notifyInsert(TreeEntry* obj) {
@@ -2448,10 +2578,11 @@ int CreatureObjectImplementation::notifyObjectInserted(SceneObject* object) {
 }
 
 int CreatureObjectImplementation::notifyObjectRemoved(SceneObject* object) {
-	if (object->isWeaponObject())
+	if (object->isWeaponObject()) {
 		setWeapon( nullptr);
+	}
 
-	return TangibleObjectImplementation::notifyObjectInserted(object);
+	return TangibleObjectImplementation::notifyObjectRemoved(object);
 }
 
 void CreatureObjectImplementation::setCreatureLink(CreatureObject* object,
@@ -3025,8 +3156,8 @@ void CreatureObjectImplementation::updateGroupMFDPositions() {
 void CreatureObjectImplementation::notifySelfPositionUpdate() {
 	auto zone = getZoneUnsafe();
 
-	if (zone != nullptr && hasState(CreatureState::ONFIRE)) {
-		PlanetManager* planetManager = zone->getPlanetManager();
+	if (zone != nullptr && zone->isGroundZone() && hasState(CreatureState::ONFIRE)) {
+		auto planetManager = zone->getPlanetManager();
 
 		if (planetManager != nullptr) {
 			TerrainManager* terrainManager = planetManager->getTerrainManager();
@@ -3050,12 +3181,12 @@ void CreatureObjectImplementation::notifySelfPositionUpdate() {
 				}
 			}
 		}
-	}
 
-	if (cooldownTimerMap->isPast("groupMFDUpdate")) {
-		cooldownTimerMap->updateToCurrentAndAddMili("groupMFDUpdate", 2000);
+		if (cooldownTimerMap->isPast("groupMFDUpdate")) {
+			cooldownTimerMap->updateToCurrentAndAddMili("groupMFDUpdate", 2000);
 
-		updateGroupMFDPositions();
+			updateGroupMFDPositions();
+		}
 	}
 
 	updateLocomotion();

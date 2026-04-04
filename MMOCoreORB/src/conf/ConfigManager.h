@@ -588,7 +588,14 @@ namespace conf {
 
 			if (configVersion.get() > cachedVersion) {
 				Locker guard(&mutex);
-				cachedSessionStatsSeconds = getInt("Core3.SessionStatsSeconds", 3600);
+				cachedSessionStatsSeconds = getInt("Core3.SessionStatsSeconds", 1800);
+#ifndef WITH_DEV_MODE
+				if (cachedSessionStatsSeconds < 300) {
+					cachedSessionStatsSeconds = 300;
+				} else if (cachedSessionStatsSeconds > 3600) {
+					cachedSessionStatsSeconds = 3600;
+				}
+#endif // !WITH_DEV_MODE
 				cachedVersion = configVersion.get();
 			}
 

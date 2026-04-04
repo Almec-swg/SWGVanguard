@@ -100,9 +100,9 @@ public:
 
 				player->sendMessage(suiBox2->generateMessage());
 			}
-#ifdef NDEBUG
+#ifdef WITH_DEV_MODE
 			Logger::console.info(true) << "\033[32;40m" << __FILE__ << ":" << __LINE__ << " dumpcov results:\n" << resp << "\033[0m";
-#endif
+#endif // WITH_DEV_MODE
 			return 0;
 		} else if (command == "bench") {
 			Reference<CreatureObject*> creo = player;
@@ -388,13 +388,7 @@ public:
 		for (int i = 0; i < playerCopy.size(); ++i) {
 			auto entry = static_cast<SceneObject*>(playerCopy.get(i).get());
 
-			if (entry->getZone() == nullptr) {
-				msg << i << " cov error: !zone: " << entry->getDisplayedName() << endl;
-			}
-
-			if (entry->getNode() == nullptr) {
-				msg << i << " tree error: !node: " << entry->getDisplayedName() << " Position: " << entry->getWorldPosition().toString() << endl;
-			}
+			msg << "#" << i << " " << entry->getDisplayedName() << " Zone: " << (entry->getLocalZone() == nullptr ? "nullptr" : "in zone") << " Node: " << (entry->getNode() == nullptr ? "nullptr" : "has node") << " Position: " << entry->getWorldPosition().toString() << endl;
 		}
 
 		msg << endl << "inRangeCov: " << inRange.size() << endl;
